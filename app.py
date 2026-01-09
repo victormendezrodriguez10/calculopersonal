@@ -146,6 +146,7 @@ CONVENIO DE REFERENCIA:
 
 INSTRUCCIONES:
 1. Extrae todos los datos de la tabla de personal (nombre, categoría, antigüedad, salario base, complementos, etc.)
+
 2. Para cada trabajador, calcula el coste de subrogación considerando:
    - Salario base según convenio
    - Antigüedad (trienios, quinquenios según aplique)
@@ -154,25 +155,41 @@ INSTRUCCIONES:
    - Seguridad Social empresa (~32%)
    - Otros conceptos del convenio
 
-3. IMPORTANTE: El usuario ha indicado que quiere calcular los costes para {years} año(s).
+3. IMPORTANTE - FACTORES ADICIONALES A CALCULAR:
+   - **Horas de jornada**: Indica las horas anuales/semanales según convenio
+   - **Suplencia por vacaciones**: Añadir coste de 1 mes de suplencia por trabajador (para cubrir vacaciones)
+   - **Absentismo**: Añadir un 2% adicional sobre el coste de personal para cubrir absentismo
+
+4. El usuario ha indicado que quiere calcular los costes para {years} año(s).
    - Multiplica los costes anuales por {years}
    - Muestra el desglose anual y el total acumulado
 
-4. Genera una tabla resumen con:
+5. Genera una TABLA DE PERSONAL con:
    - Datos de cada trabajador
    - Coste mensual
    - Coste anual
    - Coste total para {years} año(s)
 
-5. Al final, proporciona:
-   - Total general de subrogación para {years} año(s)
+6. **MUY IMPORTANTE** - Al final genera una TABLA RESUMEN DE COSTES TOTALES con el siguiente formato:
+
+| Concepto | Año 1 | Año 2 | ... | Total {years} Año(s) |
+|----------|-------|-------|-----|----------------------|
+| Coste Personal Base | X € | X € | ... | X € |
+| Suplencia Vacaciones (1 mes) | X € | X € | ... | X € |
+| Absentismo (2%) | X € | X € | ... | X € |
+| **SUBTOTAL PERSONAL** | X € | X € | ... | X € |
+| Gastos Generales (estimar 5-10% del personal) | X € | X € | ... | X € |
+| Materiales Estimados (estimar según sector) | X € | X € | ... | X € |
+| **TOTAL GENERAL** | X € | X € | ... | X € |
+
+7. Al final proporciona:
    - Coste medio por trabajador
+   - Horas totales de servicio anuales
    - Observaciones importantes
 
-IMPORTANTE: Para facilitar la exportación a Excel, presenta los datos de los trabajadores en formato de tabla markdown con estas columnas:
-| Nombre | Categoría | Antigüedad | Salario Base | Complementos | SS Empresa | Coste Mensual | Coste Anual | Coste {years} Año(s) |
+IMPORTANTE: Para facilitar la exportación a Excel, presenta TODAS las tablas en formato markdown.
 
-Responde en español y usa números con punto como separador de miles y coma para decimales (ej: 1.234,56)
+Responde en español y usa números con punto como separador de miles y coma para decimales (ej: 1.234,56 €)
 """
 
     messages_content = []
