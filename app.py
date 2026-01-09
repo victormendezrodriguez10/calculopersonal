@@ -82,6 +82,57 @@ def extract_text_from_pdf(pdf_bytes):
     pdf_document.close()
     return text
 
+def buscar_convenio_con_ia(client, nombre_convenio):
+    """Busca información del convenio usando Claude"""
+
+    prompt = f"""Eres un experto en convenios colectivos españoles y legislación laboral.
+
+TAREA: Proporciona información detallada sobre el siguiente convenio colectivo:
+"{nombre_convenio}"
+
+DEBES INCLUIR (si está disponible en tu conocimiento):
+
+1. **TABLAS SALARIALES** - Salarios base por categoría profesional
+2. **COMPLEMENTOS SALARIALES**:
+   - Plus de transporte
+   - Plus de nocturnidad
+   - Plus de festividad
+   - Otros pluses específicos del sector
+
+3. **ANTIGÜEDAD**:
+   - Tipo (trienios, quinquenios, bienios)
+   - Porcentaje o cantidad por periodo
+
+4. **PAGAS EXTRAORDINARIAS**:
+   - Número de pagas extras
+   - Cuantía (salario base, base + antigüedad, etc.)
+
+5. **JORNADA LABORAL**:
+   - Horas anuales
+   - Horas semanales
+
+6. **CATEGORÍAS PROFESIONALES** del sector
+
+7. **OTROS CONCEPTOS** relevantes para el cálculo de costes
+
+Si no tienes información exacta del convenio, proporciona datos aproximados basados en convenios similares del mismo sector, indicando claramente que son aproximaciones.
+
+Responde de forma estructurada y detallada para poder calcular costes de subrogación.
+"""
+
+    response = client.messages.create(
+        model="claude-sonnet-4-20250514",
+        max_tokens=4096,
+        messages=[
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ]
+    )
+
+    return response.content[0].text
+
 def analyze_with_claude(client, file_bytes, file_type, convenio_text, years, is_image=False):
     """Analiza el documento con Claude"""
 
@@ -312,24 +363,44 @@ def main():
 
         st.markdown("---")
 
-        st.header("📁 Convenios Disponibles")
-        convenios = get_convenios_disponibles()
+        st.header("📁 Convenio de Referencia")
 
-        if convenios:
-            convenio_seleccionado = st.selectbox(
-                "Selecciona un convenio de referencia",
-                options=["Ninguno"] + [c.name for c in convenios]
-            )
-        else:
-            st.info("No hay convenios en la carpeta")
-            convenio_seleccionado = "Ninguno"
-
-        st.markdown("---")
-        convenio_subido = st.file_uploader(
-            "O sube un convenio nuevo",
-            type=["pdf"],
-            key="convenio_upload"
+        # Selector de método de convenio
+        metodo_convenio = st.radio(
+            "¿Cómo quieres indicar el convenio?",
+            options=["Buscar con IA", "Seleccionar archivo", "Subir PDF"],
+            help="La IA puede buscar información del convenio por su nombre"
         )
+
+        convenio_seleccionado = "Ninguno"
+        convenio_subido = None
+        convenio_busqueda = ""
+
+        if metodo_convenio == "Buscar con IA":
+            convenio_busqueda = st.text_input(
+                "Nombre del convenio",
+                placeholder="Ej: Convenio colectivo de limpieza de Madrid",
+                help="Escribe el nombre del convenio y la IA buscará la información"
+            )
+            if convenio_busqueda:
+                st.success(f"✅ Se buscará: {convenio_busqueda}")
+
+        elif metodo_convenio == "Seleccionar archivo":
+            convenios = get_convenios_disponibles()
+            if convenios:
+                convenio_seleccionado = st.selectbox(
+                    "Selecciona un convenio",
+                    options=["Ninguno"] + [c.name for c in convenios]
+                )
+            else:
+                st.info("No hay convenios PDF en la carpeta")
+
+        else:  # Subir PDF
+            convenio_subido = st.file_uploader(
+                "Sube el convenio en PDF",
+                type=["pdf"],
+                key="convenio_upload"
+            )
 
     # Área principal
     col1, col2 = st.columns([1, 1])
@@ -351,10 +422,20 @@ def main():
     with col2:
         st.header("📋 Información")
 
+        # Determinar qué convenio mostrar
+        if metodo_convenio == "Buscar con IA" and convenio_busqueda:
+            convenio_mostrar = f"Buscar con IA: {convenio_busqueda}"
+        elif convenio_seleccionado != "Ninguno":
+            convenio_mostrar = convenio_seleccionado
+        elif convenio_subido:
+            convenio_mostrar = convenio_subido.name
+        else:
+            convenio_mostrar = "No seleccionado"
+
         st.info(f"""
         **Configuración actual:**
         - Años de cálculo: **{years}**
-        - Convenio: **{convenio_seleccionado if convenio_seleccionado != "Ninguno" else "No seleccionado"}**
+        - Convenio: **{convenio_mostrar}**
         """)
 
         st.markdown("""
@@ -374,7 +455,12 @@ def main():
 
             convenio_text = ""
 
-            if convenio_subido:
+            # Obtener información del convenio según el método seleccionado
+            if metodo_convenio == "Buscar con IA" and convenio_busqueda:
+                with st.spinner(f"🔍 Buscando información del convenio: {convenio_busqueda}..."):
+                    convenio_text = buscar_convenio_con_ia(client, convenio_busqueda)
+                    st.success("✅ Información del convenio obtenida")
+            elif convenio_subido:
                 convenio_text = extract_text_from_pdf(convenio_subido.read())
                 convenio_subido.seek(0)
             elif convenio_seleccionado != "Ninguno":
