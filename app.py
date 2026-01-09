@@ -137,59 +137,82 @@ Responde de forma estructurada y detallada para poder calcular costes de subroga
 def analyze_with_claude(client, file_bytes, file_type, convenio_text, years, is_image=False):
     """Analiza el documento con Claude"""
 
-    prompt = f"""Eres un experto en recursos humanos y cálculo de costes de subrogación de personal.
+    prompt = f"""Eres un experto en recursos humanos y cálculo de costes de subrogación de personal en España.
 
-TAREA: Analiza la tabla de personal del documento adjunto y calcula los costes de subrogación.
+TAREA: Analiza la tabla de personal del documento adjunto y calcula los costes de subrogación con PRECISIÓN.
 
 CONVENIO DE REFERENCIA:
 {convenio_text[:15000] if convenio_text else "No se ha proporcionado convenio de referencia."}
 
-INSTRUCCIONES:
-1. Extrae todos los datos de la tabla de personal (nombre, categoría, antigüedad, salario base, complementos, etc.)
+=== FÓRMULAS DE CÁLCULO OBLIGATORIAS ===
 
-2. Para cada trabajador, calcula el coste de subrogación considerando:
-   - Salario base según convenio
-   - Antigüedad (trienios, quinquenios según aplique)
-   - Plus de transporte
-   - Pagas extras
-   - Seguridad Social empresa (~32%)
-   - Otros conceptos del convenio
+**ESTRUCTURA SALARIAL (14 PAGAS):**
+- La mayoría de convenios españoles tienen 14 PAGAS (12 mensualidades + 2 pagas extras en junio y diciembre)
+- Salario Bruto Anual = (Salario Base + Complementos) × 14 pagas
+- NO calcular como × 12 meses
 
-3. IMPORTANTE - FACTORES ADICIONALES A CALCULAR:
-   - **Horas de jornada**: Indica las horas anuales/semanales según convenio
-   - **Suplencia por vacaciones**: Añadir coste de 1 mes de suplencia por trabajador (para cubrir vacaciones)
-   - **Absentismo**: Añadir un 2% adicional sobre el coste de personal para cubrir absentismo
+**ANTIGÜEDAD - TRIENIOS ACUMULATIVOS:**
+- Cada 3 años trabajados = 1 trienio
+- El plus de antigüedad es ACUMULATIVO (cada trienio se suma al anterior)
+- Ejemplo: 13 años = 4 trienios completos
+- El importe del trienio varía según convenio (consultar tablas)
 
-4. El usuario ha indicado que quiere calcular los costes para {years} año(s).
-   - Multiplica los costes anuales por {years}
-   - Muestra el desglose anual y el total acumulado
+**SEGURIDAD SOCIAL EMPRESA (30-32%):**
+- Aplicar sobre la BASE DE COTIZACIÓN TOTAL
+- Base cotización = Salario Bruto Mensual + Prorrata pagas extras (salario bruto × 2 / 12)
+- SS Empresa mensual = Base cotización × 0.32 (aprox)
+- SS Empresa anual = SS mensual × 12
 
-5. Genera una TABLA DE PERSONAL con:
-   - Datos de cada trabajador
-   - Coste mensual
-   - Coste anual
-   - Coste total para {years} año(s)
+**COSTE EMPRESA POR TRABAJADOR:**
+Coste Anual = Salario Bruto Anual (14 pagas) + SS Empresa Anual
 
-6. **MUY IMPORTANTE** - Al final genera una TABLA RESUMEN DE COSTES TOTALES con el siguiente formato:
+=== INSTRUCCIONES ===
 
-| Concepto | Año 1 | Año 2 | ... | Total {years} Año(s) |
-|----------|-------|-------|-----|----------------------|
-| Coste Personal Base | X € | X € | ... | X € |
-| Suplencia Vacaciones (1 mes) | X € | X € | ... | X € |
-| Absentismo (2%) | X € | X € | ... | X € |
-| **SUBTOTAL PERSONAL** | X € | X € | ... | X € |
-| Gastos Generales (estimar 5-10% del personal) | X € | X € | ... | X € |
-| Materiales Estimados (estimar según sector) | X € | X € | ... | X € |
-| **TOTAL GENERAL** | X € | X € | ... | X € |
+1. Extrae TODOS los datos de la tabla de personal (nombre/iniciales, categoría, antigüedad, jornada, etc.)
 
-7. Al final proporciona:
-   - Coste medio por trabajador
-   - Horas totales de servicio anuales
-   - Observaciones importantes
+2. Para CADA trabajador calcula:
+   - Salario Base según convenio y categoría (usar tablas 2024-2025)
+   - Plus Antigüedad = Nº trienios × importe trienio según convenio
+   - Plus Transporte y otros complementos
+   - Total Bruto Mensual = Salario Base + Antigüedad + Complementos
+   - Salario Bruto Anual = Total Bruto Mensual × 14 pagas
+   - Base Cotización Mensual = Total Bruto Mensual + (Total Bruto Mensual × 2 / 12)
+   - SS Empresa Mensual = Base Cotización × 0.32
+   - SS Empresa Anual = SS Empresa Mensual × 12
+   - COSTE EMPRESA ANUAL = Salario Bruto Anual + SS Empresa Anual
 
-IMPORTANTE: Para facilitar la exportación a Excel, presenta TODAS las tablas en formato markdown.
+3. FACTORES ADICIONALES:
+   - **Horas jornada**: Según convenio (normalmente 1.750-1.800 horas/año)
+   - **Suplencia vacaciones**: 1 mes de suplencia por trabajador = Coste mensual empresa × 1
+   - **Absentismo 2%**: Coste total personal × 0.02
 
-Responde en español y usa números con punto como separador de miles y coma para decimales (ej: 1.234,56 €)
+4. Período de cálculo: {years} año(s)
+
+5. Genera TABLA DE PERSONAL:
+| Trabajador | Categoría | Antigüedad | Trienios | Sal.Base | Antigüedad € | Complementos | Bruto Mensual | Bruto Anual (14p) | SS Empresa | Coste Anual |
+
+6. **TABLA RESUMEN DE COSTES TOTALES:**
+
+| Concepto | Año 1 | {"| Año 2 | " if years > 1 else ""}{"| Año 3 | " if years > 2 else ""}Total {years} Año(s) |
+|----------|-------|{"-------|" if years > 1 else ""}{"-------|" if years > 2 else ""}----------------------|
+| Coste Personal Base (suma costes anuales) | € | € |
+| Suplencia Vacaciones (1 mes/trabajador) | € | € |
+| Absentismo (2%) | € | € |
+| **SUBTOTAL PERSONAL** | € | € |
+| Gastos Generales (8% del subtotal) | € | € |
+| Materiales Estimados (según sector) | € | € |
+| **TOTAL GENERAL** | € | € |
+
+7. Incluye al final:
+   - Coste medio anual por trabajador
+   - Horas totales de servicio anuales (trabajadores × horas jornada)
+   - Observaciones sobre el convenio aplicado
+
+IMPORTANTE:
+- Usa SIEMPRE 14 pagas para el cálculo anual
+- Calcula los trienios correctamente según años de antigüedad
+- Presenta TODAS las tablas en formato markdown
+- Usa formato español: punto para miles, coma para decimales (ej: 18.456,78 €)
 """
 
     messages_content = []
