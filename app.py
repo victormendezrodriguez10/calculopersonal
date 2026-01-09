@@ -144,75 +144,90 @@ TAREA: Analiza la tabla de personal del documento adjunto y calcula los costes d
 CONVENIO DE REFERENCIA:
 {convenio_text[:15000] if convenio_text else "No se ha proporcionado convenio de referencia."}
 
-=== FÓRMULAS DE CÁLCULO OBLIGATORIAS ===
+=== DATOS A EXTRAER DE LA TABLA ===
 
-**ESTRUCTURA SALARIAL (14 PAGAS):**
-- La mayoría de convenios españoles tienen 14 PAGAS (12 mensualidades + 2 pagas extras en junio y diciembre)
-- Salario Bruto Anual = (Salario Base + Complementos) × 14 pagas
-- NO calcular como × 12 meses
+La tabla de personal puede incluir estos campos (usa los que estén disponibles):
+- Trabajador (nombre o iniciales)
+- Antigüedad (fecha de alta)
+- Tipo contrato (código o descripción)
+- Categoría profesional
+- **JORNADA MENSUAL** (en horas) - MUY IMPORTANTE
+- Salario bruto anual (si viene en la tabla, USARLO directamente)
 
-**ANTIGÜEDAD - TRIENIOS ACUMULATIVOS:**
-- Cada 3 años trabajados = 1 trienio
-- El plus de antigüedad es ACUMULATIVO (cada trienio se suma al anterior)
-- Ejemplo: 13 años = 4 trienios completos
-- El importe del trienio varía según convenio (consultar tablas)
+=== CÁLCULO DE JORNADA ===
 
-**SEGURIDAD SOCIAL EMPRESA (30-32%):**
-- Aplicar sobre la BASE DE COTIZACIÓN TOTAL
-- Base cotización = Salario Bruto Mensual + Prorrata pagas extras (salario bruto × 2 / 12)
-- SS Empresa mensual = Base cotización × 0.32 (aprox)
-- SS Empresa anual = SS mensual × 12
+**JORNADA COMPLETA DE REFERENCIA:**
+- Jornada completa mensual = 152 horas/mes (aprox. 1.824 horas/año)
+- Si un trabajador tiene 80 horas/mes = 52,6% de jornada
+- Si un trabajador tiene 148 horas/mes = 97,4% de jornada
 
-**COSTE EMPRESA POR TRABAJADOR:**
-Coste Anual = Salario Bruto Anual (14 pagas) + SS Empresa Anual
+**PORCENTAJE DE JORNADA:**
+% Jornada = (Horas mensuales del trabajador / 152) × 100
+
+=== FÓRMULAS DE CÁLCULO ===
+
+**SI LA TABLA YA INCLUYE "SALARIO BRUTO ANUAL":**
+- Usar directamente el salario bruto anual que aparece en la tabla
+- SS Empresa Anual = Salario Bruto Anual × 0.32 (aproximadamente)
+- COSTE EMPRESA ANUAL = Salario Bruto Anual + SS Empresa Anual
+
+**SI LA TABLA NO INCLUYE SALARIO:**
+- Calcular según convenio, proporcionalmente a la jornada
+- Salario Bruto Anual = Salario convenio jornada completa × (% Jornada / 100)
 
 === INSTRUCCIONES ===
 
-1. Extrae TODOS los datos de la tabla de personal (nombre/iniciales, categoría, antigüedad, jornada, etc.)
+1. Extrae TODOS los trabajadores con sus datos:
+   - Iniciales/Nombre
+   - Fecha antigüedad (calcular años desde esa fecha hasta hoy)
+   - Tipo contrato
+   - Categoría
+   - **Jornada mensual (HORAS)** - CRÍTICO
+   - Salario bruto anual (si aparece)
 
 2. Para CADA trabajador calcula:
-   - Salario Base según convenio y categoría (usar tablas 2024-2025)
-   - Plus Antigüedad = Nº trienios × importe trienio según convenio
-   - Plus Transporte y otros complementos
-   - Total Bruto Mensual = Salario Base + Antigüedad + Complementos
-   - Salario Bruto Anual = Total Bruto Mensual × 14 pagas
-   - Base Cotización Mensual = Total Bruto Mensual + (Total Bruto Mensual × 2 / 12)
-   - SS Empresa Mensual = Base Cotización × 0.32
-   - SS Empresa Anual = SS Empresa Mensual × 12
-   - COSTE EMPRESA ANUAL = Salario Bruto Anual + SS Empresa Anual
+   - % Jornada = Horas mensuales / 152 × 100
+   - Horas anuales = Horas mensuales × 12
+   - Salario Bruto Anual (usar el de la tabla o calcular)
+   - SS Empresa Anual = Salario Bruto × 0.32
+   - COSTE EMPRESA ANUAL = Salario Bruto + SS Empresa
 
-3. FACTORES ADICIONALES:
-   - **Horas jornada**: Según convenio (normalmente 1.750-1.800 horas/año)
-   - **Suplencia vacaciones**: 1 mes de suplencia por trabajador = Coste mensual empresa × 1
-   - **Absentismo 2%**: Coste total personal × 0.02
+3. FACTORES ADICIONALES (proporcionales a jornada):
+   - **Suplencia vacaciones**: 1 mes de suplencia = Coste mensual empresa (Coste anual / 12)
+   - **Absentismo 2%**: (Coste personal + Suplencias) × 0.02
 
 4. Período de cálculo: {years} año(s)
 
-5. Genera TABLA DE PERSONAL:
-| Trabajador | Categoría | Antigüedad | Trienios | Sal.Base | Antigüedad € | Complementos | Bruto Mensual | Bruto Anual (14p) | SS Empresa | Coste Anual |
+5. **TABLA DE PERSONAL** (incluir TODAS las columnas):
+| Trabajador | Categoría | Antigüedad | Tipo Contrato | Jornada Mes | % Jornada | Horas/Año | Bruto Anual | SS Empresa | Coste Empresa |
 
-6. **TABLA RESUMEN DE COSTES TOTALES:**
+6. **TABLA RESUMEN DE COSTES:**
 
-| Concepto | Año 1 | {"| Año 2 | " if years > 1 else ""}{"| Año 3 | " if years > 2 else ""}Total {years} Año(s) |
-|----------|-------|{"-------|" if years > 1 else ""}{"-------|" if years > 2 else ""}----------------------|
-| Coste Personal Base (suma costes anuales) | € | € |
-| Suplencia Vacaciones (1 mes/trabajador) | € | € |
+| Concepto | Año 1 | Total {years} Año(s) |
+|----------|-------|----------------------|
+| Coste Personal (suma todos) | € | € |
+| Suplencia Vacaciones (1 mes) | € | € |
 | Absentismo (2%) | € | € |
 | **SUBTOTAL PERSONAL** | € | € |
-| Gastos Generales (8% del subtotal) | € | € |
-| Materiales Estimados (según sector) | € | € |
+| Gastos Generales (8%) | € | € |
+| Materiales Estimados | € | € |
 | **TOTAL GENERAL** | € | € |
 
-7. Incluye al final:
-   - Coste medio anual por trabajador
-   - Horas totales de servicio anuales (trabajadores × horas jornada)
-   - Observaciones sobre el convenio aplicado
+7. **RESUMEN DE HORAS:**
+| Concepto | Valor |
+|----------|-------|
+| Total trabajadores | X |
+| Horas mensuales totales | X horas |
+| Horas anuales totales | X horas |
+| Equivalente jornadas completas | X |
+
+8. Observaciones importantes
 
 IMPORTANTE:
-- Usa SIEMPRE 14 pagas para el cálculo anual
-- Calcula los trienios correctamente según años de antigüedad
-- Presenta TODAS las tablas en formato markdown
-- Usa formato español: punto para miles, coma para decimales (ej: 18.456,78 €)
+- RESPETAR las horas de jornada de cada trabajador
+- Si viene el salario en la tabla, USARLO (no recalcular)
+- Calcular SS Empresa como ~32% del bruto
+- Formato español: punto miles, coma decimales (18.456,78 €)
 """
 
     messages_content = []
