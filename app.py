@@ -152,7 +152,7 @@ La tabla de personal puede incluir estos campos (usa los que estén disponibles)
 - Tipo contrato (código o descripción)
 - Categoría profesional
 - **JORNADA MENSUAL** (en horas) - MUY IMPORTANTE
-- Salario bruto anual (si viene en la tabla, USARLO directamente)
+- Salario bruto anual (IGNORAR - calcular desde convenio)
 
 === CÁLCULO DE JORNADA ===
 
@@ -166,31 +166,43 @@ La tabla de personal puede incluir estos campos (usa los que estén disponibles)
 
 === FÓRMULAS DE CÁLCULO ===
 
-**SI LA TABLA YA INCLUYE "SALARIO BRUTO ANUAL":**
-- Usar directamente el salario bruto anual que aparece en la tabla
-- SS Empresa Anual = Salario Bruto Anual × 0.32 (aproximadamente)
-- COSTE EMPRESA ANUAL = Salario Bruto Anual + SS Empresa Anual
+**IMPORTANTE: IGNORAR los salarios que aparezcan en la tabla (pueden estar incorrectos)**
+**SIEMPRE calcular los salarios desde el CONVENIO proporcionalmente a la jornada**
 
-**SI LA TABLA NO INCLUYE SALARIO:**
-- Calcular según convenio, proporcionalmente a la jornada
-- Salario Bruto Anual = Salario convenio jornada completa × (% Jornada / 100)
+**CÁLCULO DE SALARIO DESDE CONVENIO:**
+1. Obtener salario base jornada completa según categoría y convenio
+2. Calcular plus antigüedad según trienios
+3. Añadir complementos según convenio
+4. Aplicar proporción según % de jornada
+
+Salario Bruto Mensual (jornada completa) = Salario Base + Antigüedad + Complementos
+Salario Bruto Mensual (trabajador) = Salario Bruto Mensual × (% Jornada / 100)
+Salario Bruto Anual = Salario Bruto Mensual × 14 pagas
+
+**COSTE EMPRESA:**
+- SS Empresa Anual = Salario Bruto Anual × 0.32
+- COSTE EMPRESA ANUAL = Salario Bruto Anual + SS Empresa Anual
 
 === INSTRUCCIONES ===
 
 1. Extrae TODOS los trabajadores con sus datos:
    - Iniciales/Nombre
-   - Fecha antigüedad (calcular años desde esa fecha hasta hoy)
+   - Fecha antigüedad (calcular años desde esa fecha hasta hoy → número de trienios)
    - Tipo contrato
-   - Categoría
-   - **Jornada mensual (HORAS)** - CRÍTICO
-   - Salario bruto anual (si aparece)
+   - Categoría profesional
+   - **Jornada mensual (HORAS)** - CRÍTICO para el cálculo proporcional
 
 2. Para CADA trabajador calcula:
+   - Años de antigüedad = Fecha actual - Fecha alta
+   - Nº Trienios = Años antigüedad / 3 (parte entera)
    - % Jornada = Horas mensuales / 152 × 100
    - Horas anuales = Horas mensuales × 12
-   - Salario Bruto Anual (usar el de la tabla o calcular)
-   - SS Empresa Anual = Salario Bruto × 0.32
-   - COSTE EMPRESA ANUAL = Salario Bruto + SS Empresa
+   - Salario Base (convenio) × % Jornada
+   - Plus Antigüedad (convenio) × Nº Trienios × % Jornada
+   - Complementos × % Jornada
+   - Salario Bruto Anual = (Base + Antigüedad + Complementos) × 14 pagas
+   - SS Empresa Anual = Salario Bruto Anual × 0.32
+   - COSTE EMPRESA ANUAL = Salario Bruto Anual + SS Empresa
 
 3. FACTORES ADICIONALES (proporcionales a jornada):
    - **Suplencia vacaciones**: 1 mes de suplencia = Coste mensual empresa (Coste anual / 12)
@@ -225,7 +237,8 @@ La tabla de personal puede incluir estos campos (usa los que estén disponibles)
 
 IMPORTANTE:
 - RESPETAR las horas de jornada de cada trabajador
-- Si viene el salario en la tabla, USARLO (no recalcular)
+- IGNORAR salarios de la tabla - calcular SIEMPRE desde el convenio
+- Aplicar proporción de jornada a todos los conceptos salariales
 - Calcular SS Empresa como ~32% del bruto
 - Formato español: punto miles, coma decimales (18.456,78 €)
 """
