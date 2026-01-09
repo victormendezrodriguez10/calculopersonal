@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 import fitz  # PyMuPDF para leer PDFs
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
+from openpyxl.utils import get_column_letter
 
 # Cargar variables de entorno (local) o secrets (Streamlit Cloud)
 load_dotenv()
@@ -299,17 +300,18 @@ def create_excel_from_result(resultado, years):
                 current_row += 1
 
     # Ajustar anchos de columna
-    for col in ws.columns:
+    for col_num in range(1, ws.max_column + 1):
         max_length = 0
-        column = col[0].column_letter
-        for cell in col:
+        column_letter = get_column_letter(col_num)
+        for row_num in range(1, ws.max_row + 1):
+            cell = ws.cell(row=row_num, column=col_num)
             try:
-                if len(str(cell.value)) > max_length:
+                if cell.value and len(str(cell.value)) > max_length:
                     max_length = len(str(cell.value))
             except:
                 pass
-        adjusted_width = min(max_length + 2, 50)
-        ws.column_dimensions[column].width = adjusted_width
+        adjusted_width = min(max_length + 2, 50) if max_length > 0 else 10
+        ws.column_dimensions[column_letter].width = adjusted_width
 
     # Guardar en buffer
     excel_buffer = io.BytesIO()
