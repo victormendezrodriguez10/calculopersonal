@@ -297,12 +297,22 @@ def analyze_with_claude(client, file_bytes, file_type, convenio_text, years, is_
 
 TAREA: Analiza la tabla de personal del documento adjunto y calcula los costes de subrogación con PRECISIÓN.
 
-CONVENIO DE REFERENCIA:
-{convenio_text[:50000] if convenio_text else "No se ha proporcionado convenio de referencia."}
+⚠️ REGLA CRÍTICA - LEE ESTO PRIMERO ⚠️
+=============================================
+DEBES usar ÚNICAMENTE los salarios y datos que aparecen en el CONVENIO DE REFERENCIA proporcionado abajo.
+NUNCA inventes salarios. NUNCA uses valores por defecto como 750€.
+Si no encuentras un dato en el convenio, indica "NO ENCONTRADO EN CONVENIO" y deja el campo vacío.
+Cita textualmente de dónde sacas cada salario del convenio.
+=============================================
 
-=== ANÁLISIS DEL CONVENIO - PRIMERO ===
+CONVENIO DE REFERENCIA (USA ESTOS DATOS, NO OTROS):
+================================================================================
+{convenio_text[:50000] if convenio_text else "ERROR: No se ha proporcionado convenio de referencia. NO PUEDES CALCULAR SIN CONVENIO."}
+================================================================================
 
-Antes de calcular, EXTRAE del convenio estos datos (si no están, indica "No especificado"):
+=== PASO 1: EXTRAE LOS DATOS DEL CONVENIO (CITA TEXTUALMENTE) ===
+
+Antes de calcular, BUSCA en el texto del convenio anterior y COPIA TEXTUALMENTE los valores que encuentres:
 
 1. **NÚMERO DE PAGAS**: ¿Cuántas pagas al año? (12, 14, 15...)
 2. **SALARIO BASE** por categoría profesional (mensual y anual)
@@ -366,16 +376,19 @@ Antes de calcular, EXTRAE del convenio estos datos (si no están, indica "No esp
 
 === INSTRUCCIONES ===
 
-1. **PRIMERO**: Muestra un resumen de los datos del convenio encontrados:
+1. **PRIMERO - OBLIGATORIO**: Muestra EXACTAMENTE qué datos has encontrado en el convenio:
 
-| Concepto | Valor según convenio |
-|----------|---------------------|
-| Número de pagas | X |
-| Salario base [Categoría] | X €/mes |
-| Plus Transporte | X €/mes |
-| Plus Convenio | X €/mes |
-| Antigüedad (trienio) | X €/mes o X% |
-| Otros pluses | ... |
+📋 **DATOS EXTRAÍDOS DEL CONVENIO** (cita textual):
+| Concepto | Valor encontrado | Cita textual del convenio |
+|----------|------------------|---------------------------|
+| Número de pagas | X | "..." (copia la frase del convenio) |
+| Salario base [Categoría] | X €/mes | "..." (copia la frase del convenio) |
+| Plus Transporte | X €/mes | "..." (copia la frase del convenio) |
+| Plus Convenio | X €/mes | "..." (copia la frase del convenio) |
+| Antigüedad (trienio) | X €/mes | "..." (copia la frase del convenio) |
+| Otros pluses | X €/mes | "..." (copia la frase del convenio) |
+
+⚠️ Si algún valor NO aparece en el convenio, escribe "NO ENCONTRADO" y NO inventes un valor.
 
 2. Extrae TODOS los trabajadores con sus datos
 
@@ -427,12 +440,18 @@ Antes de calcular, EXTRAE del convenio estos datos (si no están, indica "No esp
    - Si algún dato no estaba en el convenio, indícalo
    - Cualquier observación relevante sobre el cálculo
 
-IMPORTANTE:
-- RESPETAR las horas de jornada de cada trabajador
-- IGNORAR salarios de la tabla - calcular SIEMPRE desde el convenio
-- Aplicar proporción de jornada a todos los conceptos salariales
-- Calcular SS Empresa como ~32% del bruto
-- Formato español: punto miles, coma decimales (18.456,78 €)
+⚠️ REGLAS OBLIGATORIAS - VIOLACIÓN = ERROR GRAVE:
+1. NUNCA inventes un salario. Si no lo encuentras en el convenio, pon "NO ENCONTRADO"
+2. NUNCA uses 750€ ni ningún valor por defecto
+3. CITA TEXTUALMENTE de dónde sacas cada salario del convenio proporcionado
+4. Si el convenio dice "Auxiliar de ayuda a domicilio: 1.200€/mes", usa 1.200€, NO 750€
+5. RESPETAR las horas de jornada de cada trabajador
+6. IGNORAR salarios de la tabla de personal - usar SOLO los del CONVENIO
+7. Aplicar proporción de jornada a todos los conceptos salariales
+8. Calcular SS Empresa como ~32% del bruto
+9. Formato español: punto miles, coma decimales (18.456,78 €)
+
+Si no puedes calcular porque falta información del convenio, INDICA CLARAMENTE qué falta.
 """
 
     messages_content = []
@@ -737,7 +756,19 @@ def main():
                 carpeta = Path(__file__).parent
                 convenio_path = carpeta / convenio_seleccionado
                 with open(convenio_path, "rb") as f:
-                    convenio_text = extract_text_from_pdf(f.read())
+                    pdf_bytes = f.read()
+                    progress_placeholder = st.empty()
+                    progress_placeholder.info("📄 Procesando convenio seleccionado...")
+                    convenio_text = extract_convenio_from_file(client, pdf_bytes, "pdf", False, progress_placeholder)
+                    progress_placeholder.success("✅ Convenio procesado correctamente")
+
+            # Mostrar preview del convenio extraído para verificación
+            if convenio_text:
+                with st.expander("👁️ Ver texto extraído del convenio (para verificar)"):
+                    st.text_area("Contenido del convenio:", convenio_text[:10000], height=200, disabled=True)
+                    st.caption(f"Total caracteres extraídos: {len(convenio_text)}")
+            else:
+                st.warning("⚠️ No se ha cargado ningún convenio. Los cálculos pueden no ser precisos.")
 
             with st.spinner("🔄 Analizando documento con IA... Esto puede tardar unos segundos."):
                 try:
