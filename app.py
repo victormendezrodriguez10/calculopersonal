@@ -83,17 +83,83 @@ def extract_text_from_pdf(pdf_bytes):
     pdf_document.close()
     return text
 
+def extract_convenio_from_image(client, image_bytes, image_type):
+    """Extrae información del convenio desde una imagen usando Claude"""
+    img_base64 = base64.standard_b64encode(image_bytes).decode("utf-8")
+    media_type = f"image/{image_type}" if image_type != "jpg" else "image/jpeg"
+
+    response = client.messages.create(
+        model="claude-sonnet-4-20250514",
+        max_tokens=8192,
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": media_type,
+                            "data": img_base64,
+                        }
+                    },
+                    {
+                        "type": "text",
+                        "text": """Extrae TODA la información de este convenio colectivo o tabla salarial.
+
+Incluye:
+- Tablas salariales con todas las categorías y salarios
+- Complementos (transporte, nocturnidad, festividad, etc.)
+- Antigüedad (trienios, porcentajes)
+- Pagas extras
+- Jornada laboral
+- Cualquier otro dato relevante para calcular costes de personal
+
+Transcribe los datos de forma estructurada y completa."""
+                    }
+                ]
+            }
+        ]
+    )
+
+    return response.content[0].text
+
+def extract_convenio_from_file(client, file_bytes, file_type, is_image):
+    """Extrae información del convenio desde PDF o imagen"""
+    if is_image:
+        return extract_convenio_from_image(client, file_bytes, file_type)
+    else:
+        # Para PDFs, intentar extraer texto primero
+        text = extract_text_from_pdf(file_bytes)
+        # Si el texto extraído es muy corto, puede ser un PDF escaneado
+        if len(text.strip()) < 500:
+            # Convertir a imágenes y procesar con Claude
+            images = pdf_to_images(file_bytes)
+            all_text = ""
+            for img_base64 in images[:15]:  # Limitar a 15 páginas
+                img_bytes = base64.standard_b64decode(img_base64)
+                page_text = extract_convenio_from_image(client, img_bytes, "png")
+                all_text += page_text + "\n\n"
+            return all_text
+        return text
+
 def buscar_convenio_con_ia(client, nombre_convenio):
-    """Busca información del convenio usando Claude"""
+    """Busca información del convenio usando Claude con búsqueda web para obtener datos actualizados"""
 
     prompt = f"""Eres un experto en convenios colectivos españoles y legislación laboral.
 
-TAREA: Proporciona información detallada sobre el siguiente convenio colectivo:
+TAREA CRÍTICA: Busca en internet el convenio colectivo MÁS RECIENTE y ACTUALIZADO:
 "{nombre_convenio}"
 
-DEBES INCLUIR (si está disponible en tu conocimiento):
+INSTRUCCIONES DE BÚSQUEDA:
+1. Busca PRIMERO en el BOE (Boletín Oficial del Estado) o boletines autonómicos/provinciales
+2. Busca la ÚLTIMA revisión salarial o tablas salariales publicadas
+3. Asegúrate de obtener los datos del año actual o el más reciente disponible
+4. Si hay varias publicaciones, usa SIEMPRE la más reciente
 
-1. **TABLAS SALARIALES** - Salarios base por categoría profesional
+DEBES INCLUIR CON DATOS ACTUALIZADOS:
+
+1. **TABLAS SALARIALES VIGENTES** - Salarios base por categoría profesional (indicar año de las tablas)
 2. **COMPLEMENTOS SALARIALES**:
    - Plus de transporte
    - Plus de nocturnidad
@@ -114,16 +180,26 @@ DEBES INCLUIR (si está disponible en tu conocimiento):
 
 6. **CATEGORÍAS PROFESIONALES** del sector
 
-7. **OTROS CONCEPTOS** relevantes para el cálculo de costes
+7. **FECHA DE PUBLICACIÓN** del convenio/tablas salariales encontradas
 
-Si no tienes información exacta del convenio, proporciona datos aproximados basados en convenios similares del mismo sector, indicando claramente que son aproximaciones.
+8. **FUENTE** (enlace al BOE u otra fuente oficial)
+
+IMPORTANTE:
+- NO uses datos aproximados ni de memoria
+- BUSCA siempre en internet para obtener los datos más recientes
+- Indica claramente la fecha y fuente de los datos
 
 Responde de forma estructurada y detallada para poder calcular costes de subrogación.
 """
 
     response = client.messages.create(
         model="claude-sonnet-4-20250514",
-        max_tokens=4096,
+        max_tokens=8192,
+        tools=[
+            {
+                "type": "web_search_20250305"
+            }
+        ],
         messages=[
             {
                 "role": "user",
@@ -132,7 +208,13 @@ Responde de forma estructurada y detallada para poder calcular costes de subroga
         ]
     )
 
-    return response.content[0].text
+    # Extraer el texto de la respuesta (puede venir en varios bloques por la búsqueda web)
+    result_text = ""
+    for block in response.content:
+        if hasattr(block, 'text'):
+            result_text += block.text + "\n"
+
+    return result_text.strip()
 
 def analyze_with_claude(client, file_bytes, file_type, convenio_text, years, is_image=False):
     """Analiza el documento con Claude"""
@@ -144,15 +226,37 @@ TAREA: Analiza la tabla de personal del documento adjunto y calcula los costes d
 CONVENIO DE REFERENCIA:
 {convenio_text[:15000] if convenio_text else "No se ha proporcionado convenio de referencia."}
 
-=== DATOS A EXTRAER DE LA TABLA ===
+=== ANÁLISIS DEL CONVENIO - PRIMERO ===
 
-La tabla de personal puede incluir estos campos (usa los que estén disponibles):
+Antes de calcular, EXTRAE del convenio estos datos (si no están, indica "No especificado"):
+
+1. **NÚMERO DE PAGAS**: ¿Cuántas pagas al año? (12, 14, 15...)
+2. **SALARIO BASE** por categoría profesional (mensual y anual)
+3. **PLUSES Y COMPLEMENTOS** (indicar importe mensual de cada uno):
+   - Plus Transporte / Locomoción
+   - Plus Convenio / Plus Empresa
+   - Plus Nocturnidad (% sobre salario base)
+   - Plus Festivos / Domingos
+   - Plus Toxicidad / Penosidad / Peligrosidad
+   - Plus Disponibilidad
+   - Plus Asistencia
+   - Otros pluses específicos del sector
+4. **ANTIGÜEDAD**:
+   - Tipo: Trienios / Bienios / Quinquenios
+   - Importe o % por cada periodo
+   - ¿Se aplica sobre salario base o sobre total?
+5. **PAGAS EXTRAORDINARIAS**:
+   - Cuántas pagas extras
+   - Base de cálculo (solo salario base, base+antigüedad, salario total...)
+
+=== DATOS A EXTRAER DE LA TABLA DE PERSONAL ===
+
 - Trabajador (nombre o iniciales)
 - Antigüedad (fecha de alta)
 - Tipo contrato (código o descripción)
 - Categoría profesional
 - **JORNADA MENSUAL** (en horas) - MUY IMPORTANTE
-- Salario bruto anual (IGNORAR - calcular desde convenio)
+- Salario bruto anual (IGNORAR - recalcular desde convenio)
 
 === CÁLCULO DE JORNADA ===
 
@@ -166,18 +270,21 @@ La tabla de personal puede incluir estos campos (usa los que estén disponibles)
 
 === FÓRMULAS DE CÁLCULO ===
 
-**IMPORTANTE: IGNORAR los salarios que aparezcan en la tabla (pueden estar incorrectos)**
+**IMPORTANTE: IGNORAR los salarios que aparezcan en la tabla (pueden estar desactualizados)**
 **SIEMPRE calcular los salarios desde el CONVENIO proporcionalmente a la jornada**
 
-**CÁLCULO DE SALARIO DESDE CONVENIO:**
-1. Obtener salario base jornada completa según categoría y convenio
-2. Calcular plus antigüedad según trienios
-3. Añadir complementos según convenio
-4. Aplicar proporción según % de jornada
+**CÁLCULO DETALLADO DEL SALARIO MENSUAL:**
+1. Salario Base (según categoría y convenio) × % Jornada
+2. Plus Antigüedad = (Importe trienio × Nº Trienios) × % Jornada
+3. Plus Transporte × % Jornada (si aplica)
+4. Plus Convenio × % Jornada (si aplica)
+5. Otros Pluses × % Jornada (si aplican)
 
-Salario Bruto Mensual (jornada completa) = Salario Base + Antigüedad + Complementos
-Salario Bruto Mensual (trabajador) = Salario Bruto Mensual × (% Jornada / 100)
-Salario Bruto Anual = Salario Bruto Mensual × 14 pagas
+**Salario Bruto Mensual** = Suma de todos los conceptos anteriores
+
+**CÁLCULO ANUAL:**
+- Si el convenio indica X pagas → Salario Bruto Anual = Salario Bruto Mensual × X pagas
+- Las pagas extras pueden tener base de cálculo diferente (verificar en convenio)
 
 **COSTE EMPRESA:**
 - SS Empresa Anual = Salario Bruto Anual × 0.32
@@ -185,35 +292,43 @@ Salario Bruto Anual = Salario Bruto Mensual × 14 pagas
 
 === INSTRUCCIONES ===
 
-1. Extrae TODOS los trabajadores con sus datos:
-   - Iniciales/Nombre
-   - Fecha antigüedad (calcular años desde esa fecha hasta hoy → número de trienios)
-   - Tipo contrato
-   - Categoría profesional
-   - **Jornada mensual (HORAS)** - CRÍTICO para el cálculo proporcional
+1. **PRIMERO**: Muestra un resumen de los datos del convenio encontrados:
 
-2. Para CADA trabajador calcula:
+| Concepto | Valor según convenio |
+|----------|---------------------|
+| Número de pagas | X |
+| Salario base [Categoría] | X €/mes |
+| Plus Transporte | X €/mes |
+| Plus Convenio | X €/mes |
+| Antigüedad (trienio) | X €/mes o X% |
+| Otros pluses | ... |
+
+2. Extrae TODOS los trabajadores con sus datos
+
+3. Para CADA trabajador calcula DESGLOSANDO todos los conceptos:
    - Años de antigüedad = Fecha actual - Fecha alta
    - Nº Trienios = Años antigüedad / 3 (parte entera)
    - % Jornada = Horas mensuales / 152 × 100
-   - Horas anuales = Horas mensuales × 12
-   - Salario Base (convenio) × % Jornada
-   - Plus Antigüedad (convenio) × Nº Trienios × % Jornada
-   - Complementos × % Jornada
-   - Salario Bruto Anual = (Base + Antigüedad + Complementos) × 14 pagas
-   - SS Empresa Anual = Salario Bruto Anual × 0.32
-   - COSTE EMPRESA ANUAL = Salario Bruto Anual + SS Empresa
+   - Salario Base × % Jornada = X €
+   - Plus Antigüedad (X trienios × importe) × % Jornada = X €
+   - Plus Transporte × % Jornada = X €
+   - Plus Convenio × % Jornada = X €
+   - Otros pluses × % Jornada = X €
+   - **Total Mensual** = Suma
+   - **Bruto Anual** = Total Mensual × Nº Pagas
+   - SS Empresa = Bruto Anual × 0.32
+   - **COSTE EMPRESA ANUAL** = Bruto Anual + SS Empresa
 
-3. FACTORES ADICIONALES (proporcionales a jornada):
-   - **Suplencia vacaciones**: 1 mes de suplencia = Coste mensual empresa (Coste anual / 12)
+4. FACTORES ADICIONALES:
+   - **Suplencia vacaciones**: 1 mes de suplencia = Coste mensual empresa
    - **Absentismo 2%**: (Coste personal + Suplencias) × 0.02
 
-4. Período de cálculo: {years} año(s)
+5. Período de cálculo: {years} año(s)
 
-5. **TABLA DE PERSONAL** (incluir TODAS las columnas):
-| Trabajador | Categoría | Antigüedad | Tipo Contrato | Jornada Mes | % Jornada | Horas/Año | Bruto Anual | SS Empresa | Coste Empresa |
+6. **TABLA DE PERSONAL DETALLADA:**
+| Trabajador | Categoría | Trienios | % Jornada | Base | Antigüedad | Transporte | Otros Pluses | Total Mes | Bruto Anual | SS Empresa | Coste Empresa |
 
-6. **TABLA RESUMEN DE COSTES:**
+7. **TABLA RESUMEN DE COSTES:**
 
 | Concepto | Año 1 | Total {years} Año(s) |
 |----------|-------|----------------------|
@@ -225,7 +340,7 @@ Salario Bruto Anual = Salario Bruto Mensual × 14 pagas
 | Materiales Estimados | € | € |
 | **TOTAL GENERAL** | € | € |
 
-7. **RESUMEN DE HORAS:**
+8. **RESUMEN DE HORAS:**
 | Concepto | Valor |
 |----------|-------|
 | Total trabajadores | X |
@@ -233,7 +348,10 @@ Salario Bruto Anual = Salario Bruto Mensual × 14 pagas
 | Horas anuales totales | X horas |
 | Equivalente jornadas completas | X |
 
-8. Observaciones importantes
+9. **OBSERVACIONES**:
+   - Indica qué pluses se han aplicado y cuáles no
+   - Si algún dato no estaba en el convenio, indícalo
+   - Cualquier observación relevante sobre el cálculo
 
 IMPORTANTE:
 - RESPETAR las horas de jornada de cada trabajador
@@ -438,7 +556,7 @@ def main():
         # Selector de método de convenio
         metodo_convenio = st.radio(
             "¿Cómo quieres indicar el convenio?",
-            options=["Buscar con IA", "Seleccionar archivo", "Subir PDF"],
+            options=["Buscar con IA", "Seleccionar archivo", "Subir archivo"],
             help="La IA puede buscar información del convenio por su nombre"
         )
 
@@ -453,7 +571,7 @@ def main():
                 help="Escribe el nombre del convenio y la IA buscará la información"
             )
             if convenio_busqueda:
-                st.success(f"✅ Se buscará: {convenio_busqueda}")
+                st.success(f"✅ Se buscará en internet la versión más reciente: {convenio_busqueda}")
 
         elif metodo_convenio == "Seleccionar archivo":
             convenios = get_convenios_disponibles()
@@ -465,12 +583,14 @@ def main():
             else:
                 st.info("No hay convenios PDF en la carpeta")
 
-        else:  # Subir PDF
+        else:  # Subir archivo
             convenio_subido = st.file_uploader(
-                "Sube el convenio en PDF",
-                type=["pdf"],
+                "Sube el convenio (PDF o imagen)",
+                type=["pdf", "png", "jpg", "jpeg"],
                 key="convenio_upload"
             )
+            if convenio_subido and convenio_subido.type.startswith("image"):
+                st.image(convenio_subido, caption="Preview del convenio", use_container_width=True)
 
     # Área principal
     col1, col2 = st.columns([1, 1])
@@ -527,12 +647,17 @@ def main():
 
             # Obtener información del convenio según el método seleccionado
             if metodo_convenio == "Buscar con IA" and convenio_busqueda:
-                with st.spinner(f"🔍 Buscando información del convenio: {convenio_busqueda}..."):
+                with st.spinner(f"🌐 Buscando en internet el convenio más reciente: {convenio_busqueda}..."):
                     convenio_text = buscar_convenio_con_ia(client, convenio_busqueda)
-                    st.success("✅ Información del convenio obtenida")
+                    st.success("✅ Convenio actualizado obtenido de internet")
             elif convenio_subido:
-                convenio_text = extract_text_from_pdf(convenio_subido.read())
-                convenio_subido.seek(0)
+                with st.spinner("📄 Procesando archivo del convenio..."):
+                    convenio_bytes = convenio_subido.read()
+                    is_convenio_image = convenio_subido.type.startswith("image")
+                    convenio_file_type = convenio_subido.type.split("/")[-1]
+                    convenio_text = extract_convenio_from_file(client, convenio_bytes, convenio_file_type, is_convenio_image)
+                    convenio_subido.seek(0)
+                    st.success("✅ Convenio procesado correctamente")
             elif convenio_seleccionado != "Ninguno":
                 carpeta = Path(__file__).parent
                 convenio_path = carpeta / convenio_seleccionado
