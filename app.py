@@ -83,14 +83,36 @@ def extract_text_from_pdf(pdf_bytes):
     pdf_document.close()
     return text
 
-def extract_convenio_from_image(client, image_bytes, image_type):
+def extract_convenio_from_image(client, image_bytes, image_type, detailed=True):
     """Extrae información del convenio desde una imagen usando Claude"""
     img_base64 = base64.standard_b64encode(image_bytes).decode("utf-8")
     media_type = f"image/{image_type}" if image_type != "jpg" else "image/jpeg"
 
+    if detailed:
+        prompt_text = """Extrae TODA la información de este convenio colectivo o tabla salarial.
+
+Incluye:
+- Tablas salariales con todas las categorías y salarios
+- Complementos (transporte, nocturnidad, festividad, etc.)
+- Antigüedad (trienios, porcentajes)
+- Pagas extras
+- Jornada laboral
+- Cualquier otro dato relevante para calcular costes de personal
+
+Transcribe los datos de forma estructurada y completa."""
+    else:
+        prompt_text = """Analiza brevemente esta página. ¿Contiene alguno de estos elementos?
+- Tablas salariales o retribuciones
+- Complementos salariales (transporte, nocturnidad, etc.)
+- Información sobre antigüedad/trienios
+- Pagas extraordinarias
+- Jornada laboral
+
+Responde SOLO con: "RELEVANTE: [motivo breve]" o "NO RELEVANTE"."""
+
     response = client.messages.create(
         model="claude-sonnet-4-20250514",
-        max_tokens=8192,
+        max_tokens=4096 if detailed else 200,
         messages=[
             {
                 "role": "user",
@@ -105,17 +127,7 @@ def extract_convenio_from_image(client, image_bytes, image_type):
                     },
                     {
                         "type": "text",
-                        "text": """Extrae TODA la información de este convenio colectivo o tabla salarial.
-
-Incluye:
-- Tablas salariales con todas las categorías y salarios
-- Complementos (transporte, nocturnidad, festividad, etc.)
-- Antigüedad (trienios, porcentajes)
-- Pagas extras
-- Jornada laboral
-- Cualquier otro dato relevante para calcular costes de personal
-
-Transcribe los datos de forma estructurada y completa."""
+                        "text": prompt_text
                     }
                 ]
             }
@@ -124,24 +136,86 @@ Transcribe los datos de forma estructurada y completa."""
 
     return response.content[0].text
 
-def extract_convenio_from_file(client, file_bytes, file_type, is_image):
-    """Extrae información del convenio desde PDF o imagen"""
+def identify_relevant_pages(client, images, progress_callback=None):
+    """Identifica qué páginas del convenio contienen información relevante"""
+    relevant_pages = []
+    total_pages = len(images)
+
+    for i, img_base64 in enumerate(images):
+        if progress_callback:
+            progress_callback(i + 1, total_pages)
+
+        img_bytes = base64.standard_b64decode(img_base64)
+        result = extract_convenio_from_image(client, img_bytes, "png", detailed=False)
+
+        if "RELEVANTE" in result.upper():
+            relevant_pages.append(i)
+
+    return relevant_pages
+
+def extract_convenio_from_file(client, file_bytes, file_type, is_image, progress_placeholder=None):
+    """Extrae información del convenio desde PDF o imagen con extracción inteligente"""
     if is_image:
-        return extract_convenio_from_image(client, file_bytes, file_type)
-    else:
-        # Para PDFs, intentar extraer texto primero
-        text = extract_text_from_pdf(file_bytes)
-        # Si el texto extraído es muy corto, puede ser un PDF escaneado
-        if len(text.strip()) < 500:
-            # Convertir a imágenes y procesar con Claude
-            images = pdf_to_images(file_bytes)
-            all_text = ""
-            for img_base64 in images[:15]:  # Limitar a 15 páginas
-                img_bytes = base64.standard_b64decode(img_base64)
-                page_text = extract_convenio_from_image(client, img_bytes, "png")
-                all_text += page_text + "\n\n"
-            return all_text
+        return extract_convenio_from_image(client, file_bytes, file_type, detailed=True)
+
+    # Para PDFs, intentar extraer texto primero
+    text = extract_text_from_pdf(file_bytes)
+
+    # Si hay suficiente texto, usarlo directamente
+    if len(text.strip()) >= 500:
         return text
+
+    # PDF escaneado - usar extracción inteligente
+    images = pdf_to_images(file_bytes)
+    total_pages = len(images)
+
+    if progress_placeholder:
+        progress_placeholder.info(f"📄 Convenio de {total_pages} páginas detectado. Analizando estructura...")
+
+    # Si son pocas páginas, procesar todas
+    if total_pages <= 20:
+        all_text = ""
+        for i, img_base64 in enumerate(images):
+            if progress_placeholder:
+                progress_placeholder.info(f"📄 Procesando página {i+1}/{total_pages}...")
+            img_bytes = base64.standard_b64decode(img_base64)
+            page_text = extract_convenio_from_image(client, img_bytes, "png", detailed=True)
+            all_text += f"\n--- PÁGINA {i+1} ---\n{page_text}\n"
+        return all_text
+
+    # Para convenios largos: extracción inteligente en 2 fases
+    if progress_placeholder:
+        progress_placeholder.info(f"🔍 Fase 1: Escaneando {total_pages} páginas para identificar tablas salariales...")
+
+    def update_progress(current, total):
+        if progress_placeholder:
+            progress_placeholder.info(f"🔍 Fase 1: Escaneando página {current}/{total}...")
+
+    # Fase 1: Identificar páginas relevantes
+    relevant_pages = identify_relevant_pages(client, images, update_progress)
+
+    if not relevant_pages:
+        # Si no encontró páginas relevantes, usar las primeras 30 páginas
+        if progress_placeholder:
+            progress_placeholder.warning("⚠️ No se identificaron páginas con tablas. Procesando primeras 30 páginas...")
+        relevant_pages = list(range(min(30, total_pages)))
+    else:
+        if progress_placeholder:
+            progress_placeholder.success(f"✅ Encontradas {len(relevant_pages)} páginas con información salarial")
+
+    # Fase 2: Extraer contenido detallado de páginas relevantes
+    if progress_placeholder:
+        progress_placeholder.info(f"📊 Fase 2: Extrayendo datos de {len(relevant_pages)} páginas relevantes...")
+
+    all_text = ""
+    for idx, page_num in enumerate(relevant_pages):
+        if progress_placeholder:
+            progress_placeholder.info(f"📊 Fase 2: Extrayendo página {page_num+1} ({idx+1}/{len(relevant_pages)})...")
+        img_bytes = base64.standard_b64decode(images[page_num])
+        page_text = extract_convenio_from_image(client, img_bytes, "png", detailed=True)
+        all_text += f"\n--- PÁGINA {page_num+1} ---\n{page_text}\n"
+
+    return all_text
 
 def buscar_convenio_con_ia(client, nombre_convenio):
     """Busca información del convenio usando Claude con búsqueda web para obtener datos actualizados"""
@@ -224,7 +298,7 @@ def analyze_with_claude(client, file_bytes, file_type, convenio_text, years, is_
 TAREA: Analiza la tabla de personal del documento adjunto y calcula los costes de subrogación con PRECISIÓN.
 
 CONVENIO DE REFERENCIA:
-{convenio_text[:15000] if convenio_text else "No se ha proporcionado convenio de referencia."}
+{convenio_text[:50000] if convenio_text else "No se ha proporcionado convenio de referencia."}
 
 === ANÁLISIS DEL CONVENIO - PRIMERO ===
 
@@ -651,13 +725,14 @@ def main():
                     convenio_text = buscar_convenio_con_ia(client, convenio_busqueda)
                     st.success("✅ Convenio actualizado obtenido de internet")
             elif convenio_subido:
-                with st.spinner("📄 Procesando archivo del convenio..."):
-                    convenio_bytes = convenio_subido.read()
-                    is_convenio_image = convenio_subido.type.startswith("image")
-                    convenio_file_type = convenio_subido.type.split("/")[-1]
-                    convenio_text = extract_convenio_from_file(client, convenio_bytes, convenio_file_type, is_convenio_image)
-                    convenio_subido.seek(0)
-                    st.success("✅ Convenio procesado correctamente")
+                progress_placeholder = st.empty()
+                progress_placeholder.info("📄 Procesando archivo del convenio...")
+                convenio_bytes = convenio_subido.read()
+                is_convenio_image = convenio_subido.type.startswith("image")
+                convenio_file_type = convenio_subido.type.split("/")[-1]
+                convenio_text = extract_convenio_from_file(client, convenio_bytes, convenio_file_type, is_convenio_image, progress_placeholder)
+                convenio_subido.seek(0)
+                progress_placeholder.success("✅ Convenio procesado correctamente")
             elif convenio_seleccionado != "Ninguno":
                 carpeta = Path(__file__).parent
                 convenio_path = carpeta / convenio_seleccionado
